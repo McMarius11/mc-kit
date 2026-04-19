@@ -84,9 +84,33 @@ Mission Control lifecycle:
   mc-kit ide:status                  Show runtime status
   mc-kit ide:logs                    Tail container logs
 
+Orchestrator helpers:
+  mc-kit next-task [--theme T] [--priority P]   Pick highest-priority open task
+  mc-kit open <id>                              Open task card in browser
+  mc-kit assign <id> "Agent Name"               Assign task (CLI escape for MC UI bug)
+  mc-kit unassign <id>                          Unassign task (workaround for UI bug)
+  mc-kit watch-dispatch [--once] [--json]       Poll for tasks assigned to
+                                                "Claude Code (external)" or tagged
+
 Optional:
-  mc-kit screenshot <xml> <tab> <out.png>    Playwright capture (requires bundle_path)
+  mc-kit screenshot <xml> <tab> <out.png>       Playwright capture (requires bundle_path)
 ```
+
+## Known MC bugs & manual patches
+
+mc-kit documents small workarounds for upstream MC bugs in `patches/`.
+Each `.md` has a copy-paste one-liner plus context — apply yourself,
+skip what you don't need. Re-run after an MC container rebuild.
+
+| # | Fix | File | Upstream |
+|---|-----|------|----------|
+| [001](patches/001-nullable-assigned-to.md) | Task-UI "Unassigned" sends `null` but API rejects it — makes `assigned_to` nullable | `src/lib/validation.ts` | not filed |
+
+If you don't want to patch MC at all, use the CLI workaround:
+`mc-kit unassign <id>` sends an empty string (which the current schema
+accepts) instead of `null`.
+
+
 
 ## Setting up Mission Control itself
 
