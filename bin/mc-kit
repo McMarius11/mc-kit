@@ -35,8 +35,11 @@ Live task operations (orchestrator helpers):
   next-task [--theme T] [--priority P] [--json]
                                  Pick highest-priority open task (for orchestrator dispatch)
   open <id>                      Open task card in the browser
-  watch-dispatch [--tag T] [--interval S] [--once] [--json]
-                                 Poll MC for tasks with dispatch tag (default: claude-dispatch)
+  assign <id> "Agent Name"       Assign task to agent (CLI escape hatch; MC UI has a bug)
+  unassign <id>                  Unassign task (sends assigned_to="", MC UI sends null → 400)
+  watch-dispatch [--assigned-to NAME] [--tag T] [--interval S] [--once] [--json]
+                                 Poll MC for tasks assigned to "Claude Code (external)" (default)
+                                 OR tagged 'claude-dispatch' — first match wins, assignment preferred
 
 Mission Control lifecycle:
   ide                            Start MC container (idempotent), open dashboard
@@ -266,12 +269,30 @@ async function cmdOpen(args) {
   spawn(opener, [url], { detached: true, stdio: 'ignore' }).unref();
 }
 
+async function cmdAssign(args) {
+  const cfg = loadConfig();
+  const { resolveTaskId, request } = require(path.join(pkgRoot, 'lib', 'client'));
+  if (!args[0]) throw new Error('Usage: mc-kit assign <task-id> <agent-name | "">  (empty string unassigns)');
+  const id = await resolveTaskId(cfg, args[0]);
+  const newAssignee = args.slice(1).join(' ');
+  const res = await request(cfg, 'PUT', '/api/tasks/' + id, { assigned_to: newAssignee });
+  if (res.status >= 400) throw new Error('PUT failed: ' + res.status + ' ' + JSON.stringify(res.data));
+  const t = (res.data && res.data.task) || res.data;
+  console.log('✓ Task ' + id + ' → assigned_to=' + JSON.stringify(t.assigned_to || ''));
+}
+
+async function cmdUnassign(args) {
+  return cmdAssign([args[0], '']);
+}
+
 async function cmdWatchDispatch(args) {
   const cfg = loadConfig();
-  const { pollDispatched, notify, DEFAULT_TAG } = require(path.join(pkgRoot, 'lib', 'dispatch'));
+  const { pollDispatched, notify, DEFAULT_TAG, DEFAULT_ASSIGNEE } = require(path.join(pkgRoot, 'lib', 'dispatch'));
   const tagIdx = args.indexOf('--tag');
+  const assignIdx = args.indexOf('--assigned-to');
   const intIdx = args.indexOf('--interval');
   const tag = tagIdx >= 0 ? args[tagIdx + 1] : DEFAULT_TAG;
+  const assignedTo = assignIdx >= 0 ? args[assignIdx + 1] : DEFAULT_ASSIGNEE;
   const interval = intIdx >= 0 ? Math.max(5, parseInt(args[intIdx + 1], 10) || 60) : 60;
   const once = args.includes('--once');
   const json = args.includes('--json');
@@ -282,15 +303,15 @@ async function cmdWatchDispatch(args) {
   };
 
   while (true) {
-    let tagged = [];
+    let dispatched = [];
     try {
-      tagged = await pollDispatched(cfg, { tag });
+      dispatched = await pollDispatched(cfg, { tag, assignedTo });
     } catch (e) {
       process.stderr.write('[watch-dispatch] poll error: ' + e.message + '\n');
       if (once) process.exit(2);
     }
-    if (tagged.length > 0) {
-      const top = tagged[0];
+    if (dispatched.length > 0) {
+      const top = dispatched[0];
       const f = formatTop(top);
       if (json) {
         console.log(JSON.stringify(top));
@@ -307,7 +328,7 @@ async function cmdWatchDispatch(args) {
     } else if (once) {
       process.exit(1);
     } else {
-      process.stderr.write('[watch-dispatch] no tasks tagged "' + tag + '"; next poll in ' + interval + 's\n');
+      process.stderr.write('[watch-dispatch] no tasks assigned to "' + assignedTo + '" or tagged "' + tag + '"; next poll in ' + interval + 's\n');
     }
     if (once) return;
     await new Promise(r => setTimeout(r, interval * 1000));
@@ -344,6 +365,8 @@ const CMDS = {
   'open-count':   cmdOpenCount,
   'next-task':    cmdNextTask,
   'open':         cmdOpen,
+  'assign':       cmdAssign,
+  'unassign':     cmdUnassign,
   'watch-dispatch': cmdWatchDispatch,
   'ide':          (a) => cmdIde(['start', ...a]),
   'ide:start':    (a) => cmdIde(['start', ...a]),
