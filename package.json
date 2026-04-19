@@ -1,0 +1,40 @@
+{
+  "name": "mc-kit",
+  "version": "0.1.0",
+  "description": "Mission Control integration toolkit — backlog sync, task dispatch, container lifecycle, screenshot evidence. Zero-dep CLI for local AI-agent workflows.",
+  "bin": {
+    "mc-kit": "./bin/mc-kit"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "scripts/",
+    "templates/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "echo 'No tests yet'"
+  },
+  "keywords": [
+    "mission-control",
+    "claude-code",
+    "agent-orchestration",
+    "kanban",
+    "backlog-sync",
+    "fedora",
+    "podman"
+  ],
+  "author": "McMarius11",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/McMarius11/mc-kit.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.56.0"
+  }
+}

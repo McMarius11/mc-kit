@@ -1,0 +1,220 @@
+#!/usr/bin/env node
+// Copyright (c) 2026 Marius Kamm. MIT.
+// mc-kit — CLI entry point. Dispatches subcommands to lib/*.
+
+'use strict';
+
+const fs   = require('fs');
+const path = require('path');
+const os   = require('os');
+
+const pkgRoot = path.resolve(__dirname, '..');
+const { loadConfig, DEFAULTS } = require(path.join(pkgRoot, 'lib', 'config'));
+
+const USAGE = `mc-kit — Mission Control integration toolkit
+
+Usage: mc-kit <command> [args...]
+
+Project setup:
+  init                           Create .mc-kit.json in current directory (prompts)
+  doctor                         Check MC reachable, .env present, API_KEY valid
+
+Sync backlog <-> MC:
+  sync push [--dry]              Push docs/BACKLOG.md items to MC Kanban
+  sync pull [--dry]              Pull "done" status from MC back to BACKLOG.md
+
+Live task operations (orchestrator helpers):
+  list [--status S] [--json]     List tasks (filter by status)
+  get <id>                       Task details (id = #B<NN> | PANO-NN | raw)
+  status <id> <new-status>       Set status (inbox|assigned|in_progress|review|quality_review|done)
+  comment <id> "text"            Post comment
+  open-count                     Print integer: how many tasks not-done
+
+Mission Control lifecycle:
+  ide                            Start MC container (idempotent), open dashboard
+  ide:stop                       Stop MC container
+  ide:status                     Show container status
+  ide:logs                       Tail container logs
+
+Optional features:
+  screenshot <xml> <tab> <out>   Headless Playwright capture (needs cfg.bundle_path)
+  status-gen                     Regenerate STATUS.md
+
+Env overrides:
+  MC_BASE       default: ${DEFAULTS.mc_base}
+  MC_ENV_FILE   default: ${DEFAULTS.mc_env_file}
+
+Config: .mc-kit.json in project root. See 'mc-kit init' to scaffold.
+`;
+
+function readLine(prompt) {
+  return new Promise(resolve => {
+    const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(prompt, ans => { rl.close(); resolve(ans.trim()); });
+  });
+}
+
+async function cmdInit() {
+  const cwd = process.cwd();
+  const target = path.join(cwd, '.mc-kit.json');
+  if (fs.existsSync(target)) {
+    const yn = await readLine('.mc-kit.json already exists — overwrite? [y/N] ');
+    if (yn.toLowerCase() !== 'y') return console.log('Aborted.');
+  }
+  const name = await readLine('Project name (e.g. "My App"): ');
+  const backlog = await readLine('Backlog path [docs/BACKLOG.md]: ') || 'docs/BACKLOG.md';
+  const bundle = await readLine('Optional bundle for screenshots (HTML file) []: ');
+
+  const cfg = {
+    project_name: name,
+    project_desc: '',
+    backlog_path: backlog,
+    id_prefix: 'B',
+    themes: ['AUDIT', 'PARITY', 'UX', 'PERF', 'TRUST'],
+  };
+  if (bundle) cfg.bundle_path = bundle;
+
+  fs.writeFileSync(target, JSON.stringify(cfg, null, 2) + '\n');
+  console.log('✓ Wrote .mc-kit.json');
+
+  const backlogAbs = path.join(cwd, backlog);
+  if (!fs.existsSync(backlogAbs)) {
+    const stub = fs.readFileSync(path.join(pkgRoot, 'templates', 'backlog-stub.md'), 'utf8');
+    fs.mkdirSync(path.dirname(backlogAbs), { recursive: true });
+    fs.writeFileSync(backlogAbs, stub.replace(/{{PROJECT_NAME}}/g, name));
+    console.log('✓ Created backlog stub at ' + backlog);
+  }
+
+  console.log('\nNext steps:');
+  console.log('  1. mc-kit doctor           # verify MC is reachable');
+  console.log('  2. mc-kit sync push        # push backlog to Kanban');
+  console.log('  3. mc-kit ide              # open dashboard');
+}
+
+async function cmdDoctor() {
+  const cfg = loadConfig();
+  const { readApiKey } = require(path.join(pkgRoot, 'lib', 'config'));
+  const { request } = require(path.join(pkgRoot, 'lib', 'client'));
+  console.log('Project root: ' + cfg._root);
+  console.log('Project name: ' + cfg.project_name);
+  console.log('Backlog:      ' + cfg.backlog_path + '  ' + (fs.existsSync(cfg.backlog_path) ? '✓' : '✗ missing'));
+  console.log('MC base:      ' + cfg.mc_base);
+  console.log('MC .env:      ' + cfg.mc_env_file);
+  try { readApiKey(cfg); console.log('API key:      ✓ present'); }
+  catch (e) { console.log('API key:      ✗ ' + e.message); return process.exit(1); }
+  try {
+    const r = await request(cfg, 'GET', '/api/projects');
+    console.log('MC API:       ✓ reachable (' + r.status + ')');
+  } catch (e) {
+    console.log('MC API:       ✗ ' + e.message);
+    console.log('\nIs the container running? Try: mc-kit ide');
+    process.exit(1);
+  }
+}
+
+async function cmdSync(args) {
+  const cfg = loadConfig();
+  const { push, pull } = require(path.join(pkgRoot, 'lib', 'sync'));
+  const dry = args.includes('--dry') || args.includes('--dry-run');
+  const mode = args[0] || 'push';
+  if (mode === 'push') return void (await push(cfg, { dry }));
+  if (mode === 'pull') return void (await pull(cfg, { dry }));
+  throw new Error('sync mode: push | pull');
+}
+
+async function cmdList(args) {
+  const cfg = loadConfig();
+  const { listTasks } = require(path.join(pkgRoot, 'lib', 'client'));
+  const statusIdx = args.indexOf('--status');
+  const filter = {};
+  if (statusIdx >= 0) filter.status = args[statusIdx + 1];
+  const tasks = await listTasks(cfg, filter);
+  if (args.includes('--json')) return console.log(JSON.stringify(tasks, null, 2));
+  console.log('Total: ' + tasks.length);
+  tasks.forEach(t => {
+    const tags = (t.tags || []).find(x => x.startsWith('#' + cfg.id_prefix)) || '';
+    console.log(`  ${(t.ticket_ref || '?').padEnd(10)} ${tags.padEnd(8)} [${(t.priority || '?').padEnd(6)}] ${(t.status || '?').padEnd(14)} ${(t.title || '').slice(0, 70)}`);
+  });
+}
+
+async function cmdGet(args) {
+  const cfg = loadConfig();
+  const { getTask } = require(path.join(pkgRoot, 'lib', 'client'));
+  const t = await getTask(cfg, args[0]);
+  if (args.includes('--json')) return console.log(JSON.stringify(t, null, 2));
+  console.log('---');
+  console.log('ID:         ' + t.id + '  (' + t.ticket_ref + ')');
+  console.log('Title:      ' + t.title);
+  console.log('Status:     ' + t.status + '  (priority: ' + t.priority + ')');
+  console.log('Tags:       ' + (t.tags || []).join(', '));
+  if (t.description) { console.log('---'); console.log(t.description); }
+}
+
+async function cmdStatus(args) {
+  const cfg = loadConfig();
+  const { setStatus } = require(path.join(pkgRoot, 'lib', 'client'));
+  const res = await setStatus(cfg, args[0], args[1]);
+  console.log('✓ Task ' + res.id + ' → ' + res.status);
+}
+
+async function cmdComment(args) {
+  const cfg = loadConfig();
+  const { comment } = require(path.join(pkgRoot, 'lib', 'client'));
+  const res = await comment(cfg, args[0], args.slice(1).join(' '));
+  console.log('✓ Comment added to task ' + res.id);
+}
+
+async function cmdOpenCount() {
+  const cfg = loadConfig();
+  const { openCount } = require(path.join(pkgRoot, 'lib', 'client'));
+  console.log(await openCount(cfg));
+}
+
+async function cmdIde(args) {
+  const cfg = loadConfig({ optional: true });
+  const script = path.join(pkgRoot, 'scripts', 'ide.sh');
+  const { spawn } = require('child_process');
+  const sub = args[0] || 'start';
+  const child = spawn('bash', [script, sub], {
+    stdio: 'inherit',
+    env: { ...process.env, MC_DIR: cfg.mc_dir, MC_URL: cfg.mc_base, MC_KIT_PROJECT_ROOT: cfg._root || process.cwd() },
+  });
+  await new Promise(r => child.on('close', r));
+}
+
+async function cmdScreenshot(args) {
+  const cfg = loadConfig();
+  const { capture } = require(path.join(pkgRoot, 'lib', 'screenshot'));
+  const out = await capture(cfg, args);
+  console.log('Wrote ' + out);
+}
+
+const CMDS = {
+  'init':         cmdInit,
+  'doctor':       cmdDoctor,
+  'sync':         cmdSync,
+  'list':         cmdList,
+  'get':          cmdGet,
+  'status':       cmdStatus,
+  'comment':      cmdComment,
+  'open-count':   cmdOpenCount,
+  'ide':          (a) => cmdIde(['start', ...a]),
+  'ide:stop':     () => cmdIde(['stop']),
+  'ide:status':   () => cmdIde(['status']),
+  'ide:logs':     () => cmdIde(['logs']),
+  'screenshot':   cmdScreenshot,
+};
+
+async function main() {
+  const [cmd, ...args] = process.argv.slice(2);
+  if (!cmd || cmd === '--help' || cmd === '-h') return console.log(USAGE);
+  const fn = CMDS[cmd];
+  if (!fn) { console.error('Unknown command: ' + cmd + '\n\n' + USAGE); process.exit(1); }
+  try { await fn(args); }
+  catch (e) {
+    console.error('ERROR: ' + e.message);
+    if (/ECONNREFUSED/.test(e.message)) console.error('MC not running — try: mc-kit ide');
+    process.exit(1);
+  }
+}
+main();

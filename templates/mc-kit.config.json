@@ -1,0 +1,11 @@
+{
+  "project_name": "My Project",
+  "project_desc": "Short description — appears in MC as the project description",
+  "backlog_path": "docs/BACKLOG.md",
+  "id_prefix": "B",
+  "themes": ["AUDIT", "PARITY", "UX", "PERF", "TRUST"],
+  "bundle_path": null,
+  "screenshot_dir": "tools/screenshots",
+  "status_path": "docs/STATUS.md",
+  "agent_reports_dir": "docs/.agent-reports"
+}

@@ -1,0 +1,21 @@
+# Template: docker-compose.override.yml for Mission Control on Fedora + podman.
+# Copied into ~/Arbeit/mission-control/ by `mc-kit` install scripts so MC can
+# read the host's Claude Code credentials + projects directory.
+#
+# Three pieces of non-obvious wiring:
+#   1. userns_mode: keep-id   — maps host uid onto the container's nextjs user
+#      so rootless Podman can read bind-mounted files (adjust gid/uid to match
+#      your MC image if it changes)
+#   2. ,z SELinux relabel     — Fedora enforcing; without it the mount is
+#      unreadable even with correct UIDs
+#   3. HOME=/home/nextjs      — MC's image sets USER nextjs but no HOME entry,
+#      so node's `~/.claude` lookup fails without this override
+#
+# ro = read-only so MC can never corrupt host Claude auth.
+services:
+  mission-control:
+    userns_mode: "keep-id:uid=1001,gid=1001"
+    environment:
+      - HOME=/home/nextjs
+    volumes:
+      - ${HOME}/.claude:/home/nextjs/.claude:ro,z
