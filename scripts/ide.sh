@@ -39,8 +39,11 @@ case "$SUB" in
       info "Syncing backlog from $PROJECT_ROOT..."
       (cd "$PROJECT_ROOT" && node "$(dirname "$(dirname "$0")")/bin/mc-kit" sync push 2>&1 | sed 's/^/  /') || warn "Sync issues, dashboard still usable"
     fi
-    if command -v xdg-open >/dev/null 2>&1; then xdg-open "$MC_URL" >/dev/null 2>&1 &
-    elif command -v open >/dev/null 2>&1; then open "$MC_URL" &; fi
+    if command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$MC_URL" >/dev/null 2>&1 &
+    elif command -v open >/dev/null 2>&1; then
+      open "$MC_URL" >/dev/null 2>&1 &
+    fi
     ok "Command Center ready ($RUNTIME)"
     echo ""
     echo "  Dashboard: $MC_URL"
