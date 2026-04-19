@@ -32,6 +32,7 @@ Live task operations (orchestrator helpers):
 
 Mission Control lifecycle:
   ide                            Start MC container (idempotent), open dashboard
+  ide:start                      Alias for 'ide'
   ide:stop                       Stop MC container
   ide:status                     Show container status
   ide:logs                       Tail container logs
@@ -199,6 +200,7 @@ const CMDS = {
   'comment':      cmdComment,
   'open-count':   cmdOpenCount,
   'ide':          (a) => cmdIde(['start', ...a]),
+  'ide:start':    (a) => cmdIde(['start', ...a]),
   'ide:stop':     () => cmdIde(['stop']),
   'ide:status':   () => cmdIde(['status']),
   'ide:logs':     () => cmdIde(['logs']),
